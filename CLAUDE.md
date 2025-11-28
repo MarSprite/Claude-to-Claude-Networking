@@ -9,8 +9,10 @@ The easiest way to collaborate across machines:
 ### On Machine B (the one you'll leave unattended)
 ```bash
 cd /path/to/your/project
-python /path/to/c2c_collab.py --name machine-b
+python /path/to/c2c_collab.py
 ```
+
+(Uses hostname as instance name by default, or specify `--name your-name`)
 
 This starts Claude Code in permissive mode with the C2C Bridge. Copy the displayed credentials to Machine A.
 
@@ -140,7 +142,7 @@ c2c_collab.py           # Easy launcher for collaboration sessions
 python c2c_collab.py --help
 
 Options:
-  --name, -n          Instance name (required)
+  --name, -n          Instance name (default: hostname)
   --directory, -d     Working directory for Claude Code (default: current)
   --port, -p          HTTPS port (default: 8443)
   --idle-timeout, -t  Seconds before auto-shutdown (default: 900)
