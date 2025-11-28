@@ -10,12 +10,13 @@ from mcp.server.fastmcp import FastMCP
 
 from .config import Settings, ServerMode
 from .security import TLSManager, TokenAuthenticator, LANValidator
-from .broker import MessageBroker, StateManager, TaskQueue
+from .broker import MessageBroker, StateManager, TaskQueue, SessionManager
 from .tools import (
     register_messaging_tools,
     register_discovery_tools,
     register_context_tools,
     register_task_tools,
+    register_session_tools,
 )
 
 
@@ -45,12 +46,24 @@ class C2CServer:
         self.authenticator = TokenAuthenticator(settings.token_path)
         self.lan_validator = LANValidator()
 
+        # Session manager for idle timeout (default 15 min, configurable)
+        idle_timeout = settings.auto_shutdown_idle if settings.auto_shutdown_idle > 0 else 900
+        self.session_manager = SessionManager(
+            idle_timeout_seconds=idle_timeout,
+            on_session_end=self._handle_session_end,
+        )
+        self._shutdown_requested = False
+
         # Register all tools
         self._register_tools()
 
     def _get_instance_name(self) -> str:
         """Get the current instance name."""
         return self.settings.instance_name
+
+    def _handle_session_end(self) -> None:
+        """Handle session end callback."""
+        self._shutdown_requested = True
 
     def _register_tools(self) -> None:
         """Register all MCP tools."""
@@ -75,6 +88,11 @@ class C2CServer:
             self.mcp,
             self.task_queue,
             self.broker,
+            self._get_instance_name
+        )
+        register_session_tools(
+            self.mcp,
+            self.session_manager,
             self._get_instance_name
         )
 
@@ -124,16 +142,17 @@ class C2CServer:
             extra={"mode": self.settings.mode}
         )
 
-    def _print_server_info(self, token: str) -> None:
+    def _print_server_info(self, token: str, idle_timeout: int) -> None:
         """Print server connection information."""
         ips = self.tls_manager.get_local_ips()
 
         print("\n" + "=" * 50)
-        print("C2C Bridge Server Started")
+        print("C2C Bridge - Collaboration Session Active")
         print("=" * 50)
         print(f"Instance Name: {self.settings.instance_name}")
         print(f"Mode: {self.settings.mode}")
         print(f"Port: {self.settings.port}")
+        print(f"Idle Timeout: {idle_timeout // 60} minutes")
         print("")
         print("Connection URLs:")
         for ip in ips:
@@ -142,10 +161,10 @@ class C2CServer:
         print("")
         print(f"Auth Token: {token}")
         print("")
-        print("To connect from another machine:")
-        print("1. Copy the credentials/ folder")
-        print("2. Configure MCP in Claude Code settings")
-        print("=" * 50 + "\n")
+        print("Session will auto-shutdown after idle timeout.")
+        print("Remote can extend or end session via MCP tools.")
+        print("=" * 50)
+        print("\n[Session active - waiting for connections...]\n")
 
     async def run_stdio(self) -> None:
         """Run as stdio MCP server (local mode)."""
@@ -161,17 +180,60 @@ class C2CServer:
             sys.exit(1)
 
         await self._register_self()
-        self._print_server_info(token)
+
+        # Start session
+        idle_timeout = self.settings.auto_shutdown_idle if self.settings.auto_shutdown_idle > 0 else 900
+        await self.session_manager.start_session()
+        self._print_server_info(token, idle_timeout)
 
         # Import and run HTTP server
         from .http_server import run_http_server
 
-        await run_http_server(
-            mcp=self.mcp,
-            settings=self.settings,
-            authenticator=self.authenticator,
-            lan_validator=self.lan_validator,
+        # Run server with session monitoring
+        server_task = asyncio.create_task(
+            run_http_server(
+                mcp=self.mcp,
+                settings=self.settings,
+                authenticator=self.authenticator,
+                lan_validator=self.lan_validator,
+                session_manager=self.session_manager,
+            )
         )
+
+        shutdown_task = asyncio.create_task(
+            self.session_manager.wait_for_shutdown()
+        )
+
+        # Wait for either server error or session end
+        done, pending = await asyncio.wait(
+            [server_task, shutdown_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        # Print session end message
+        status = await self.session_manager.get_status()
+        print("\n" + "=" * 50)
+        print("Session Ended")
+        print("=" * 50)
+        if "end_reason" in status:
+            reason = status.get("end_reason", "unknown")
+            if reason == "idle_timeout":
+                print("Reason: Idle timeout reached")
+            elif reason == "remote_request":
+                print("Reason: Ended by remote instance")
+            else:
+                print(f"Reason: {reason}")
+        print(f"Tasks completed: {status.get('tasks_completed', 0)}")
+        print(f"Messages sent: {status.get('messages_sent', 0)}")
+        print("=" * 50 + "\n")
 
     async def run_hybrid(self) -> None:
         """Run as both stdio and HTTPS server."""
@@ -181,12 +243,16 @@ class C2CServer:
             sys.exit(1)
 
         await self._register_self()
-        self._print_server_info(token)
+
+        # Start session
+        idle_timeout = self.settings.auto_shutdown_idle if self.settings.auto_shutdown_idle > 0 else 900
+        await self.session_manager.start_session()
+        self._print_server_info(token, idle_timeout)
 
         # Import HTTP server
         from .http_server import run_http_server
 
-        # Run both concurrently
+        # Run both concurrently with session monitoring
         await asyncio.gather(
             self.mcp.run(transport="stdio"),
             run_http_server(
@@ -194,6 +260,7 @@ class C2CServer:
                 settings=self.settings,
                 authenticator=self.authenticator,
                 lan_validator=self.lan_validator,
+                session_manager=self.session_manager,
             ),
         )
 

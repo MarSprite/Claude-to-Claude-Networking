@@ -1,5 +1,6 @@
 """HTTPS server with TLS, authentication, and LAN validation."""
 
+import asyncio
 import ssl
 from typing import Optional
 
@@ -16,6 +17,7 @@ from mcp.server.sse import SseServerTransport
 
 from .config import Settings
 from .security import TokenAuthenticator, LANValidator
+from .broker import SessionManager
 
 
 class LANValidationMiddleware(BaseHTTPMiddleware):
@@ -74,6 +76,21 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class SessionActivityMiddleware(BaseHTTPMiddleware):
+    """Middleware to track activity for session timeout."""
+
+    def __init__(self, app, session_manager: Optional[SessionManager]):
+        super().__init__(app)
+        self.session_manager = session_manager
+
+    async def dispatch(self, request: Request, call_next):
+        # Record activity on meaningful requests (not health checks)
+        if self.session_manager and request.url.path != "/health":
+            await self.session_manager.record_activity("http_request")
+
+        return await call_next(request)
+
+
 def create_ssl_context(settings: Settings) -> ssl.SSLContext:
     """Create SSL context for HTTPS server.
 
@@ -98,7 +115,8 @@ def create_ssl_context(settings: Settings) -> ssl.SSLContext:
 def create_app(
     mcp: FastMCP,
     authenticator: TokenAuthenticator,
-    lan_validator: LANValidator
+    lan_validator: LANValidator,
+    session_manager: Optional[SessionManager] = None,
 ) -> Starlette:
     """Create the Starlette ASGI application.
 
@@ -106,6 +124,7 @@ def create_app(
         mcp: The FastMCP server instance.
         authenticator: Token authenticator.
         lan_validator: LAN IP validator.
+        session_manager: Optional session manager for activity tracking.
 
     Returns:
         Configured Starlette app.
@@ -164,6 +183,7 @@ def create_app(
     middleware = [
         Middleware(LANValidationMiddleware, lan_validator=lan_validator),
         Middleware(AuthenticationMiddleware, authenticator=authenticator),
+        Middleware(SessionActivityMiddleware, session_manager=session_manager),
     ]
 
     app = Starlette(
@@ -181,6 +201,7 @@ async def run_http_server(
     settings: Settings,
     authenticator: TokenAuthenticator,
     lan_validator: LANValidator,
+    session_manager: Optional[SessionManager] = None,
 ) -> None:
     """Run the HTTPS server.
 
@@ -189,8 +210,9 @@ async def run_http_server(
         settings: Server settings.
         authenticator: Token authenticator.
         lan_validator: LAN IP validator.
+        session_manager: Optional session manager for activity tracking.
     """
-    app = create_app(mcp, authenticator, lan_validator)
+    app = create_app(mcp, authenticator, lan_validator, session_manager)
     ssl_context = create_ssl_context(settings)
 
     config = uvicorn.Config(

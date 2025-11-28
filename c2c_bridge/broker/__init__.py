@@ -3,6 +3,7 @@
 from .message_broker import MessageBroker, C2CMessage, MessageType, MessagePriority
 from .state_manager import StateManager
 from .task_queue import TaskQueue, Task, TaskStatus
+from .session_manager import SessionManager
 
 __all__ = [
     "MessageBroker",
@@ -13,4 +14,5 @@ __all__ = [
     "TaskQueue",
     "Task",
     "TaskStatus",
+    "SessionManager",
 ]
