@@ -1,6 +1,10 @@
 # C2C Bridge - Project Memory
 
-## Current State (2025-11-27)
+## Current State (2025-11-27) - Ready for Testing
+
+**Branch:** `session-collaboration` (pushed to GitHub)
+
+**Status:** Implementation complete, awaiting deployment test on second machine.
 
 ### What's Built
 A working MCP server enabling secure communication between Claude Code instances on different LAN machines, with session-based collaboration and automatic idle timeout.
@@ -120,6 +124,30 @@ c2c_collab.py              # Simple launcher for collaboration sessions
 - **Permission interception** - Not needed; no wrapper required
 
 The user considered these but decided the simpler model (trust Claude + session bounds) fits their workflow better.
+
+## Next Steps - Testing
+
+When ready to test:
+
+### On Machine B (remote machine)
+```bash
+git clone https://github.com/MarSprite/Claude-to-Claude-Networking.git
+cd Claude-to-Claude-Networking
+git checkout session-collaboration
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Run from your target project directory:
+cd /path/to/project
+python /path/to/Claude-to-Claude-Networking/c2c_collab.py
+```
+
+### Copy credentials to Machine A
+The `credentials/` folder is generated on first run. Copy it to Machine A.
+
+### On Machine A (where you work)
+Configure Claude Code MCP settings to connect to Machine B's displayed URL with the token.
 
 ## Future Considerations
 
