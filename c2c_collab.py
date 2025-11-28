@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import json
 import os
+import platform
 import shutil
 import signal
 import subprocess
@@ -63,8 +64,8 @@ remote instance calls c2c_end_session().
 
     parser.add_argument(
         "--name", "-n",
-        required=True,
-        help="Name for this machine (e.g., 'workstation', 'laptop')"
+        default=None,
+        help="Name for this machine (default: hostname)"
     )
 
     parser.add_argument(
@@ -260,6 +261,10 @@ async def run_bridge_only(args, credentials_dir: Path):
 def main():
     """Main entry point."""
     args = parse_args()
+
+    # Default name to hostname
+    if args.name is None:
+        args.name = platform.node() or "unnamed"
 
     # Determine working directory
     working_dir = args.directory or Path.cwd()
